@@ -8,7 +8,7 @@ Simple example illustrating Qt Charts capabilities to plot curves with
 a high number of points, using OpenGL accelerated series
 """
 
-from PyQt5.QtChart import QChart, QChartView, QLineSeries
+from PyQt5.QtChart import QChart, QChartView, QLineSeries, QScatterSeries
 from PyQt5.QtGui import QPolygonF, QPainter
 from PyQt5.QtWidgets import QMainWindow
 
@@ -34,6 +34,27 @@ def series_to_polyline(xdata, ydata):
     memory = np.frombuffer(pointer, dtype)
     memory[:(size-1)*2+1:2] = xdata
     memory[1:(size-1)*2+2:2] = ydata
+    return polyline
+
+
+def series_to_polystep(xdata, ydata):
+    """Convert series data to QPolygon(F) polyline
+
+    This code is derived from PythonQwt's function named
+    `qwt.plot_curve.series_to_polyline`"""
+    nx = len(xdata)
+    size = 2 * nx - 1
+    polyline = QPolygonF(size)
+    pointer = polyline.data()
+    dtype, tinfo = np.float, np.finfo  # integers: = np.int, np.iinfo
+    pointer.setsize(2*polyline.size()*tinfo(dtype).dtype.itemsize)
+    memory = np.frombuffer(pointer, dtype)
+    # memory[:(size-1)*2+1:2] = xdata
+    # memory[1:(size-1)*2+2:2] = ydata
+    memory[:(size-1)*2+1:2][::2] = xdata
+    memory[1:(size-1)*2+2:2][::2] = ydata
+    memory[:(size-1)*2+1:2][1::2] = xdata[1:]
+    memory[1:(size-1)*2+2:2][1::2] = ydata[:-1]
     return polyline
 
 
@@ -168,7 +189,6 @@ class TestChartView(QChartView):
         super(TestChartView, self).mouseMoveEvent(event)
 
 
-
 class TestWindow(QMainWindow):
     def __init__(self, parent=None):
         super(TestWindow, self).__init__(parent=parent)
@@ -185,22 +205,35 @@ class TestWindow(QMainWindow):
     def add_data(self, xdata, ydata, color=None, **kwargs):
         global options
         curve = QLineSeries()
-        pen = curve.pen()
+        # pen = curve.pen()
+        # if color is not None:
+        #     pen.setColor(color)
+        # pen.setWidthF(1)
+        # curve.setPen(pen)
         if color is not None:
-            pen.setColor(color)
-        pen.setWidthF(1)
-        curve.setPen(pen)
+            curve.setColor(color)
+        curve.setUseOpenGL(options["opengl"])
+        # curve.append(series_to_polyline(xdata, ydata))
+        curve.replace(series_to_polystep(xdata, ydata))
+        self.chart.addSeries(curve)
+        self.chart.createDefaultAxes()
+        self.ncurves += 1
+
+    def add_scatter(self, xdata, ydata, color=None, **kwargs):
+        global options
+        curve = QScatterSeries()
+        curve.setMarkerShape(QScatterSeries.MarkerShapeCircle)
+        # pen = curve.pen()
+        # if color is not None:
+        #     pen.setColor(color)
+        # pen.setWidthF(1)
+        # curve.setPen(pen)
+        if color is not None:
+            curve.setColor(color)
         curve.setUseOpenGL(options["opengl"])
         curve.append(series_to_polyline(xdata, ydata))
         self.chart.addSeries(curve)
-
         self.chart.createDefaultAxes()
-
-        for axis in [self.chart.axisX(), self.chart.axisY()]:
-            axis.setGridLineVisible(True)
-            axis.setGridLineColor(Qt.lightGray)
-            axis.setLinePenColor(Qt.gray)
-
         self.ncurves += 1
 
 
@@ -208,12 +241,16 @@ if __name__ == '__main__':
     print("loading data")
     import h5py
 
-    time = data["recvTimestamp"] - data["recvTimestamp"][0]
+    time = data["recvTimestamp"]  - data["recvTimestamp"][0]
     time = time * 1e-9 / 86400
     bid = data["bidPrice0"]
     ask = data["askPrice0"]
 
-    print(time)
+    lp = data["tradePrice"]
+    side = data["tradeAggSide"]
+
+    mb = side == b'B'
+    ms = side == b'S'
 
     print("plotting")
 
@@ -230,6 +267,8 @@ if __name__ == '__main__':
     # window.add_data(xdata, np.cos(xdata), color=Qt.blue)
     window.add_data(time, bid, color=Qt.blue)
     window.add_data(time, ask, color=Qt.red)
+    window.add_scatter(time[mb], lp[mb], color=Qt.blue)
+    window.add_scatter(time[ms], lp[ms], color=Qt.red)
     window.set_title("Simple example with %d curves of %d points "
                      "(OpenGL Accelerated Series)"
                      % (window.ncurves, npoints))
